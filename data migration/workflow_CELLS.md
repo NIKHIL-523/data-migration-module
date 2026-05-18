@@ -974,8 +974,8 @@ apply.
 
 **Run when.** Immediately after Cell 30 with `apply=True`.
 
-**Gotcha.** Only checks `KEY`. If you syncing multiple keys, run this
-cell once per key (or extend it to iterate over a list of keys).
+**Gotcha.** Only checks `KEY`. If you are syncing multiple keys, run
+this cell once per key (or extend it to iterate over a list of keys).
 
 ---
 

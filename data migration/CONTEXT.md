@@ -81,19 +81,21 @@ viewer can override cells without touching code.
 
 ## State CSV schemas
 
-`table_state.csv` (driven by migrate.py + Cell 11 validator):
+`table_state.csv` (driven by migrate.py + the table-validation cell):
 
 | column | populated by | values |
 |---|---|---|
-| `table_suffix` (PK) | seeded at bundle write | string |
+| `table_key` (PK) | seeded at bundle write | `<src_db>__<src_table>` — unique across source schemas |
 | `qa_table`, `prod_table` | seeded; refreshed by migrate.py | fully qualified `<db>.<t>` |
-| `apply_status` | migrate.py | `""` | `applying` | `success` | `failed` | `timeout` |
+| `apply_status` | migrate.py | `""` \| `applying` \| `success` \| `failed` \| `timeout` |
 | `apply_at` | migrate.py | ISO UTC |
-| `k8s_state` | migrate.py | `COMPLETED` | `FAILED` | `SUBMITTED` | … |
+| `k8s_state` | migrate.py | `COMPLETED` \| `FAILED` \| `SUBMITTED` \| … |
 | `k8s_name` | migrate.py | RFC-1123 metadata.name |
 | `apply_error` | migrate.py | string |
-| `validation_status` | Cell 11 | `""` | `ok` | `mismatch` | `error` |
-| `validation_at`, `qa_count`, `prod_count`, `validation_error` | Cell 11 | … |
+| `validation_status` | notebook | `""` \| `ok` \| `mismatch` \| `error` |
+| `validation_at`, `qa_count`, `prod_count`, `prod_count_total` | notebook | … |
+| `partition_qa`, `partition_prod`, `partition_match` | notebook | derived via Py4J |
+| `validation_error` | notebook | string |
 
 `view_state.csv` (driven by view_workflow):
 
@@ -136,7 +138,7 @@ For batch overrides: edit the CSV in any editor or in a notebook cell:
 ```python
 from session_state import load_state, save_state
 df = load_state(bundle, kind="table")
-df.loc[df["table_suffix"] == "sds_em__finding__publish", "apply_status"] = ""
+df.loc[df["table_key"] == "kg_publish_final__sds_em__finding__publish", "apply_status"] = ""
 save_state(df, bundle, kind="table")
 ```
 
