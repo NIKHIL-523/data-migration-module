@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Per-run bundles (sessions are generated artifacts; keep out of git)
+data migration/sessions/
+
+# Rendered Spark manifests (only emitted on ops VM)
+**/rendered/
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Distribution
+build/
+dist/
+*.egg-info/
