@@ -13,12 +13,12 @@ Reads:
   ./table_state.csv      Progress tracker (this script reads AND writes it).
                          CSV so JupyterLab can open the same file in its
                          click-to-edit table viewer. Schema:
-                             table_key, qa_table, prod_table,
+                             table_key, source_table, target_table,
                              apply_status, apply_at, k8s_state, k8s_name,
                              apply_error,
                              validation_status, validation_at,
-                             qa_count, prod_count, prod_count_total,
-                             partition_qa, partition_prod, partition_match,
+                             source_count, target_count, target_count_total,
+                             partition_source, partition_target, partition_match,
                              validation_error
                          `table_key` is "<src_db>__<src_table>" so two
                          tables with the same bare name in different
@@ -64,11 +64,11 @@ STATE_PATH       = SCRIPT_DIR / "table_state.csv"
 
 STATE_COLUMNS = [
     "table_key",
-    "qa_table", "prod_table",
+    "source_table", "target_table",
     "apply_status", "apply_at", "k8s_state", "k8s_name", "apply_error",
     "validation_status", "validation_at",
-    "qa_count", "prod_count", "prod_count_total",
-    "partition_qa", "partition_prod", "partition_match",
+    "source_count", "target_count", "target_count_total",
+    "partition_source", "partition_target", "partition_match",
     "validation_error",
 ]
 
@@ -167,20 +167,20 @@ def k8s_name_for(table: str, override: str | None = None) -> str:
     return table.split(".")[-1].replace("_", "").replace("-", "")[:53]
 
 
-def prod_table_from_row(qa_table: str, row: dict, default_output_schema: str) -> str:
+def target_table_from_row(source_table: str, row: dict, default_output_schema: str) -> str:
     tgt_db    = (row.get("outputSchema") or default_output_schema or "").strip()
-    tgt_table = (row.get("outputTable") or table_name(qa_table)).strip()
+    tgt_table = (row.get("outputTable") or table_name(source_table)).strip()
     if not tgt_db:
-        # Mirror-copy fallback: tgt_db = qa_db. build_datasources_rows omits
+        # Mirror-copy fallback: tgt_db = source_db. build_datasources_rows omits
         # outputSchema when src/tgt schemas match, so this branch handles
         # `{src_schema=X, src_table=Y}` with no overrides.
-        if "." in qa_table:
-            tgt_db = qa_table.split(".", 1)[0]
+        if "." in source_table:
+            tgt_db = source_table.split(".", 1)[0]
         else:
             raise RuntimeError(
-                f"cannot derive prod schema for {qa_table!r}: no outputSchema "
+                f"cannot derive prod schema for {source_table!r}: no outputSchema "
                 "on the row, no default --outputSchema on the template, and "
-                "qa_table is not in <db>.<name> form."
+                "source_table is not in <db>.<name> form."
             )
     return f"{tgt_db}.{tgt_table}"
 
@@ -233,20 +233,20 @@ def save_state(state: dict[str, dict[str, str]]) -> None:
             writer.writerow(row)
 
 
-def state_status(state: dict, qa_table: str) -> str:
-    entry = state.get(table_key(qa_table)) or {}
+def state_status(state: dict, source_table: str) -> str:
+    entry = state.get(table_key(source_table)) or {}
     return (entry.get("apply_status") or "").strip().lower()
 
 
-def mark_apply(state: dict, *, qa_table: str, prod_table: str, k8s_name: str,
+def mark_apply(state: dict, *, source_table: str, target_table: str, k8s_name: str,
                apply_status: str, k8s_state: str | None,
                apply_error: str | None) -> None:
-    suf = table_key(qa_table)
+    suf = table_key(source_table)
     entry = state.get(suf, {c: "" for c in STATE_COLUMNS})
     entry.update({
         "table_key":     suf,
-        "qa_table":      qa_table,
-        "prod_table":    prod_table,
+        "source_table":      source_table,
+        "target_table":    target_table,
         "apply_status":  apply_status,
         "apply_at":      utc_now_iso(),
         "k8s_state":     k8s_state or "",
@@ -282,7 +282,7 @@ def render(row: dict, template: dict) -> tuple[str, str, Path, int | None]:
         set_or_append_arg(args, "--outputSchema", str(output_schema_override).strip())
 
     effective_schema = get_arg(args, "--outputSchema") or ""
-    prod_t = prod_table_from_row(table, row, effective_schema)
+    target_t = target_table_from_row(table, row, effective_schema)
 
     # Don't ship --outputSchema "" to IcebergMigrate. For mirror copies the
     # row omits outputSchema and the template default is "", so dropping the
@@ -296,12 +296,12 @@ def render(row: dict, template: dict) -> tuple[str, str, Path, int | None]:
     with out_path.open("w") as f:
         json.dump(rendered, f, indent=2)
 
-    qa_count_raw = row.get("qa_count")
+    source_count_raw = row.get("source_count")
     try:
-        qa_count = int(qa_count_raw) if qa_count_raw is not None else None
+        source_count = int(source_count_raw) if source_count_raw is not None else None
     except (TypeError, ValueError):
-        qa_count = None
-    return table, prod_t, out_path, qa_count
+        source_count = None
+    return table, target_t, out_path, source_count
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +484,10 @@ def main() -> int:
     rendered_items: list[tuple[str, str, Path, int | None]] = []
     for row in rows:
         try:
-            qa_t, prod_t, path, qa_count = render(row, template)
-            rendered_items.append((qa_t, prod_t, path, qa_count))
-            cnt_disp = f"  [qa_count={qa_count:,}]" if qa_count else ""
-            print(f"[RENDER] {qa_t}  ->  {prod_t}  ::  "
+            source_t, target_t, path, source_count = render(row, template)
+            rendered_items.append((source_t, target_t, path, source_count))
+            cnt_disp = f"  [source_count={source_count:,}]" if source_count else ""
+            print(f"[RENDER] {source_t}  ->  {target_t}  ::  "
                   f"{path.relative_to(SCRIPT_DIR)}{cnt_disp}")
         except Exception as e:
             print(f"[FAIL-RENDER] {row!r}: {e}", file=sys.stderr)
@@ -496,12 +496,12 @@ def main() -> int:
     # Collision check
     seen_names: dict[str, str] = {}
     collisions: list[tuple[str, str, str]] = []
-    for qa_t, _, path, _ in rendered_items:
+    for source_t, _, path, _ in rendered_items:
         with path.open() as f:
             name = json.load(f)["metadata"]["name"]
-        if name in seen_names and seen_names[name] != qa_t:
-            collisions.append((name, seen_names[name], qa_t))
-        seen_names.setdefault(name, qa_t)
+        if name in seen_names and seen_names[name] != source_t:
+            collisions.append((name, seen_names[name], source_t))
+        seen_names.setdefault(name, source_t)
     if collisions:
         print("FATAL: k8s metadata.name collisions detected:", file=sys.stderr)
         for name, t1, t2 in collisions:
@@ -518,23 +518,23 @@ def main() -> int:
     failures:  list[tuple[str, str]] = []
     aborted = False
 
-    for i, (qa_t, prod_t, path, qa_count) in enumerate(rendered_items):
+    for i, (source_t, target_t, path, source_count) in enumerate(rendered_items):
         k8s_name, namespace = read_manifest_identity(path)
 
         try:
             stdout = kubectl_apply(path)
-            cnt_disp = f"qa_count={qa_count:,}  " if qa_count else ""
-            print(f"[APPLY]  {qa_t}  {cnt_disp}::  {stdout}")
-            mark_apply(state, qa_table=qa_t, prod_table=prod_t, k8s_name=k8s_name,
+            cnt_disp = f"source_count={source_count:,}  " if source_count else ""
+            print(f"[APPLY]  {source_t}  {cnt_disp}::  {stdout}")
+            mark_apply(state, source_table=source_t, target_table=target_t, k8s_name=k8s_name,
                        apply_status="applying", k8s_state="SUBMITTED",
                        apply_error=None)
             save_state(state)
         except Exception as e:
-            failures.append((qa_t, f"apply: {e}"))
-            mark_apply(state, qa_table=qa_t, prod_table=prod_t, k8s_name=k8s_name,
+            failures.append((source_t, f"apply: {e}"))
+            mark_apply(state, source_table=source_t, target_table=target_t, k8s_name=k8s_name,
                        apply_status="failed", k8s_state=None, apply_error=str(e))
             save_state(state)
-            print(f"[FAIL-APPLY] {qa_t}\n{e}\n", file=sys.stderr)
+            print(f"[FAIL-APPLY] {source_t}\n{e}\n", file=sys.stderr)
             if not opts.continue_on_failure:
                 aborted = True
                 break
@@ -549,27 +549,27 @@ def main() -> int:
                 timeout=opts.poll_timeout,
             )
         except TimeoutError as e:
-            failures.append((qa_t, f"poll-timeout: {e}"))
-            mark_apply(state, qa_table=qa_t, prod_table=prod_t, k8s_name=k8s_name,
+            failures.append((source_t, f"poll-timeout: {e}"))
+            mark_apply(state, source_table=source_t, target_table=target_t, k8s_name=k8s_name,
                        apply_status="timeout", k8s_state=None, apply_error=str(e))
             save_state(state)
-            print(f"[FAIL-TIMEOUT] {qa_t}: {e}", file=sys.stderr)
+            print(f"[FAIL-TIMEOUT] {source_t}: {e}", file=sys.stderr)
             aborted = True
             break
 
         if final == "COMPLETED":
-            successes.append(qa_t)
-            mark_apply(state, qa_table=qa_t, prod_table=prod_t, k8s_name=k8s_name,
+            successes.append(source_t)
+            mark_apply(state, source_table=source_t, target_table=target_t, k8s_name=k8s_name,
                        apply_status="success", k8s_state=final, apply_error=None)
             save_state(state)
-            print(f"[DONE]   {qa_t}: COMPLETED")
+            print(f"[DONE]   {source_t}: COMPLETED")
         else:  # FAILED
-            failures.append((qa_t, "SparkApplication state=FAILED"))
-            mark_apply(state, qa_table=qa_t, prod_table=prod_t, k8s_name=k8s_name,
+            failures.append((source_t, "SparkApplication state=FAILED"))
+            mark_apply(state, source_table=source_t, target_table=target_t, k8s_name=k8s_name,
                        apply_status="failed", k8s_state=final,
                        apply_error="SparkApplication ended in FAILED state")
             save_state(state)
-            print(f"[FAIL-SPARK] {qa_t}: FAILED", file=sys.stderr)
+            print(f"[FAIL-SPARK] {source_t}: FAILED", file=sys.stderr)
             if not opts.continue_on_failure:
                 print("Aborting batch (use --continue-on-failure to keep going).",
                       file=sys.stderr)

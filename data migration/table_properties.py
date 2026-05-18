@@ -72,12 +72,12 @@ def compare_properties(spark, fqn: str):
     return pd.DataFrame(rows, columns=["key", "sql_value", "iceberg_value", "only_in"])
 
 
-def diff_qa_vs_prod(spark, qa_fqn: str, prod_fqn: str):
+def diff_source_vs_target(spark, source_fqn: str, target_fqn: str):
     """
     Compare TBLPROPERTIES across two FQNs using SHOW TBLPROPERTIES as the
     canonical user-visible set. Returns a pandas DataFrame:
 
-        key, qa_value, prod_value, status   ({equal, missing_on_prod,
+        key, source_value, target_value, status   ({equal, missing_on_prod,
                                               extra_on_prod, value_changed})
 
     Use this after compare_properties has shown that the SQL view captures
@@ -86,8 +86,8 @@ def diff_qa_vs_prod(spark, qa_fqn: str, prod_fqn: str):
     """
     import pandas as pd
 
-    qa = properties_via_sql(spark, qa_fqn)
-    pd_ = properties_via_sql(spark, prod_fqn)
+    qa = properties_via_sql(spark, source_fqn)
+    pd_ = properties_via_sql(spark, target_fqn)
 
     rows: list[dict] = []
     for key in sorted(set(qa) | set(pd_)):
@@ -101,11 +101,11 @@ def diff_qa_vs_prod(spark, qa_fqn: str, prod_fqn: str):
             status = "extra_on_prod"
         rows.append({
             "key":        key,
-            "qa_value":   qa.get(key, ""),
-            "prod_value": pd_.get(key, ""),
+            "source_value":   qa.get(key, ""),
+            "target_value": pd_.get(key, ""),
             "status":     status,
         })
-    return pd.DataFrame(rows, columns=["key", "qa_value", "prod_value", "status"])
+    return pd.DataFrame(rows, columns=["key", "source_value", "target_value", "status"])
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +134,22 @@ def _sql_quote(value: str) -> str:
 
 def plan_property_sync(
     spark,
-    qa_fqn: str,
-    prod_fqn: str,
+    source_fqn: str,
+    target_fqn: str,
     *,
     source: str = "iceberg",
     skip_keys: frozenset[str] = RESERVED_KEYS,
 ) -> dict[str, str]:
     """
-    Compute the SET TBLPROPERTIES plan for `prod_fqn`: every key on QA
+    Compute the SET TBLPROPERTIES plan for `target_fqn`: every key on QA
     whose value is missing or different on prod, minus reserved keys.
 
     source = 'iceberg' (default) uses Py4J table.properties() — the
     user-set view. source = 'sql' uses SHOW TBLPROPERTIES.
     """
     read = properties_via_iceberg if source == "iceberg" else properties_via_sql
-    qa = read(spark, qa_fqn)
-    pd_ = read(spark, prod_fqn)
+    qa = read(spark, source_fqn)
+    pd_ = read(spark, target_fqn)
     plan: dict[str, str] = {}
     for key, value in qa.items():
         if key in skip_keys:
@@ -159,14 +159,14 @@ def plan_property_sync(
     return plan
 
 
-def apply_property_plan(spark, prod_fqn: str, plan: dict[str, str]) -> None:
-    """Run a single ALTER TABLE SET TBLPROPERTIES on `prod_fqn`."""
+def apply_property_plan(spark, target_fqn: str, plan: dict[str, str]) -> None:
+    """Run a single ALTER TABLE SET TBLPROPERTIES on `target_fqn`."""
     if not plan:
         return
     pairs = ", ".join(
         f"'{_sql_quote(k)}'='{_sql_quote(v)}'" for k, v in plan.items()
     )
-    spark.sql(f"ALTER TABLE {prod_fqn} SET TBLPROPERTIES ({pairs})")
+    spark.sql(f"ALTER TABLE {target_fqn} SET TBLPROPERTIES ({pairs})")
 
 
 def sync_batch(
@@ -180,18 +180,18 @@ def sync_batch(
     """
     Plan (and optionally apply) the property sync across many tables.
 
-    `pairs` is an iterable of (qa_fqn, prod_fqn). Returns a pandas
-    DataFrame: qa_fqn, prod_fqn, key_count, keys, applied, error, at.
+    `pairs` is an iterable of (source_fqn, target_fqn). Returns a pandas
+    DataFrame: source_fqn, target_fqn, key_count, keys, applied, error, at.
     Dry-run by default — pass dry_run=False to actually run ALTERs.
     """
     import pandas as pd
     from datetime import datetime, timezone
 
     rows: list[dict] = []
-    for qa_fqn, prod_fqn in pairs:
+    for source_fqn, target_fqn in pairs:
         row = {
-            "qa_fqn":    qa_fqn,
-            "prod_fqn":  prod_fqn,
+            "source_fqn":    source_fqn,
+            "target_fqn":  target_fqn,
             "key_count": 0,
             "keys":      "",
             "applied":   False,
@@ -200,20 +200,20 @@ def sync_batch(
         }
         try:
             plan = plan_property_sync(
-                spark, qa_fqn, prod_fqn,
+                spark, source_fqn, target_fqn,
                 source=source, skip_keys=skip_keys,
             )
             row["key_count"] = len(plan)
             row["keys"] = ",".join(sorted(plan))
             if plan and not dry_run:
-                apply_property_plan(spark, prod_fqn, plan)
+                apply_property_plan(spark, target_fqn, plan)
                 row["applied"] = True
         except Exception as exc:
             row["error"] = str(exc)
         rows.append(row)
     return pd.DataFrame(
         rows,
-        columns=["qa_fqn", "prod_fqn", "key_count", "keys",
+        columns=["source_fqn", "target_fqn", "key_count", "keys",
                  "applied", "error", "at"],
     )
 
@@ -222,7 +222,7 @@ __all__ = [
     "properties_via_sql",
     "properties_via_iceberg",
     "compare_properties",
-    "diff_qa_vs_prod",
+    "diff_source_vs_target",
     "RESERVED_KEYS",
     "plan_property_sync",
     "apply_property_plan",

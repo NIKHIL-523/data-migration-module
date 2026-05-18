@@ -14,8 +14,8 @@ table_state.csv  (driven by migrate.py + the validate cell)
     table_key          (PK; "<src_db>__<src_table>", unique across schemas
                         so two rows with the same bare table name in
                         different src schemas don't collide)
-    qa_table           full db.table on QA side
-    prod_table         full db.table on prod side
+    source_table           full db.table on QA side
+    target_table         full db.table on prod side
     apply_status       "" | success | failed | timeout | applying
     apply_at           ISO UTC timestamp or ""
     k8s_state          COMPLETED | FAILED | SUBMITTED | ... | ""
@@ -23,27 +23,27 @@ table_state.csv  (driven by migrate.py + the validate cell)
     apply_error        free-text error or ""
     validation_status  "" | ok | mismatch | error
     validation_at      ISO UTC timestamp or ""
-    qa_count           int or "" (post-filter COUNT(*) on QA)
-    prod_count         int or "" (post-filter COUNT(*) on prod)
-    prod_count_total   int or "" (UN-filtered COUNT(*) on prod;
+    source_count           int or "" (post-filter COUNT(*) on QA)
+    target_count         int or "" (post-filter COUNT(*) on prod)
+    target_count_total   int or "" (UN-filtered COUNT(*) on prod;
                        sanity check that prod isn't carrying rows beyond
                        the cutoff used for this migrate)
-    partition_qa       partition spec, migrate.py format e.g. "updated_at_ts:day"
-    partition_prod     same, on prod side
+    partition_source       partition spec, migrate.py format e.g. "updated_at_ts:day"
+    partition_target     same, on prod side
     partition_match    "true" / "false"
     validation_error   free-text or ""
 
 view_state.csv  (driven by view_workflow.migrate_view + validate_view)
     view_suffix
-    qa_view
-    prod_view
+    source_view_fqn    full catalog-qualified source view (e.g. iceberg_catalog1.kg.<view>)
+    target_view_fqn    full catalog-qualified target view (e.g. iceberg_catalog2.kg.<view>)
     migrate_status     "" | success | failed
     migrate_at
     migrate_error
     validation_status  "" | ok | mismatch | error
     validation_at
-    qa_count
-    prod_count
+    source_count
+    target_count
     mismatched_rows
     validation_error
 
@@ -63,22 +63,22 @@ VIEW_STATE_NAME  = "view_state.csv"
 TABLE_STATE_COLUMNS = [
     # Identity
     "table_key",
-    "qa_table", "prod_table",
+    "source_table", "target_table",
     # Migration (stamped by migrate.py on the ops VM)
     "apply_status", "apply_at", "k8s_state", "k8s_name", "apply_error",
     # Validation (this is what you'll re-run after a migrate)
     "validation_status", "validation_at",
-    "qa_count", "prod_count", "prod_count_total",
-    "partition_qa", "partition_prod", "partition_match",
+    "source_count", "target_count", "target_count_total",
+    "partition_source", "partition_target", "partition_match",
     "validation_error",
 ]
 
 VIEW_STATE_COLUMNS = [
     "view_suffix",
-    "qa_view", "prod_view",
+    "source_view_fqn", "target_view_fqn",
     "migrate_status", "migrate_at", "migrate_error",
     "validation_status", "validation_at",
-    "qa_count", "prod_count", "mismatched_rows", "validation_error",
+    "source_count", "target_count", "mismatched_rows", "validation_error",
 ]
 
 

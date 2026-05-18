@@ -11,7 +11,7 @@ Per the workflow Cell 3 contract, each input row specifies:
         "partition_columns":  "<col[:transform],...>",     (optional; derived via Py4J if missing)
         "filter_expression":  "<sql predicate>",           (optional)
         "k8s_name":           "<rfc-1123 metadata.name>",  (optional; collision override)
-        "qa_count":           <int>,                       (optional; informational)
+        "source_count":           <int>,                       (optional; informational)
     }
 
 Emits per-row datasources.json shape consumed by migrate.py:
@@ -22,7 +22,7 @@ Emits per-row datasources.json shape consumed by migrate.py:
         "outputSchema":      "<tgt_schema>",  (when != src_schema)
         "outputTable":       "<tgt_table>",   (when != src_table)
         "k8sName":           "...",      (when set)
-        "qa_count":          <int>       (when set)
+        "source_count":          <int>       (when set)
     }
 """
 
@@ -34,7 +34,7 @@ from catalog_traversal import derive_partition_columns
 def build_datasources_rows(
     spark,
     *,
-    qa_catalog: str = "iceberg_catalog1",
+    source_catalog: str = "iceberg_catalog1",
     selections: list[dict],
     auto_derive_partitions: bool = True,
 ) -> list[dict]:
@@ -62,7 +62,7 @@ def build_datasources_rows(
         if not src_schema or not src_table:
             errors.append((str(raw), "missing src_schema or src_table"))
             continue
-        qa_full = f"{src_schema}.{src_table}"
+        source_full = f"{src_schema}.{src_table}"
 
         tgt_schema = (raw.get("tgt_schema") or src_schema).strip()
         tgt_table  = (raw.get("tgt_table")  or src_table ).strip()
@@ -71,13 +71,13 @@ def build_datasources_rows(
         part_cols = (raw.get("partition_columns") or "").strip()
         if not part_cols and auto_derive_partitions:
             try:
-                part_cols = derive_partition_columns(spark, f"{qa_catalog}.{qa_full}")
+                part_cols = derive_partition_columns(spark, f"{source_catalog}.{source_full}")
             except Exception as e:
-                errors.append((qa_full, f"partition derivation failed: {e}"))
+                errors.append((source_full, f"partition derivation failed: {e}"))
                 part_cols = ""
 
         row: dict = {
-            "table": qa_full,
+            "table": source_full,
             "partitionColumns": part_cols,
         }
         filter_expr = (raw.get("filter_expression") or "").strip()
@@ -90,12 +90,12 @@ def build_datasources_rows(
         k8s = (raw.get("k8s_name") or "").strip()
         if k8s:
             row["k8sName"] = k8s
-        qa_count = raw.get("qa_count")
-        if qa_count is not None:
+        source_count = raw.get("source_count")
+        if source_count is not None:
             try:
-                row["qa_count"] = int(qa_count)
+                row["source_count"] = int(source_count)
             except (TypeError, ValueError):
-                errors.append((qa_full, f"qa_count not int: {qa_count!r}"))
+                errors.append((source_full, f"source_count not int: {source_count!r}"))
         out.append(row)
 
     if errors:
