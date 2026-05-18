@@ -163,6 +163,7 @@ def build_template(
         "spark.sql.caseSensitive": "true",
         "spark.sql.files.maxPartitionBytes": "128MB",
         "spark.default.parallelism": "4",
+        "spark.driver.maxResultSize": str(sparkapp.get("driver_max_result_size", "4g")),
         "spark.app.name": "iceberg-table-migrator-job",
     }
     if extra_spark_conf:

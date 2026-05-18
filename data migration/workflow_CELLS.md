@@ -97,12 +97,13 @@ connection = {
 }
 
 sparkapp = {
-    "driver_cores":          "4",
-    "driver_memory":         "20g",
-    "executor_cores":        "3",
-    "executor_memory":       "30g",
-    "executor_instances":    "30",
-    "executor_core_request": "1000m",
+    "driver_cores":           "4",
+    "driver_memory":          "20g",
+    "driver_max_result_size": "4g",
+    "executor_cores":         "8",
+    "executor_memory":        "40g",
+    "executor_instances":     "25",
+    "executor_core_request":  "500m",
     "oidc_url": "https://qa.sds.ontp.app/realms/prod/protocol/openid-connect/token",
 }
 
