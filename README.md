@@ -11,44 +11,7 @@
 
 ---
 
-## At a glance
-
-```mermaid
-flowchart LR
-    classDef setup    fill:#DBEAFE,stroke:#1E40AF,color:#1E3A8A
-    classDef discover fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef bundle   fill:#FCE7F3,stroke:#BE185D,color:#831843
-    classDef tables   fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef views    fill:#FFEDD5,stroke:#C2410C,color:#7C2D12
-    classDef state    fill:#CCFBF1,stroke:#0F766E,color:#134E4A
-    classDef validate fill:#E0F2FE,stroke:#0369A1,color:#0C4A6E
-    classDef fork     fill:#FEF3C7,stroke:#A16207,color:#713F12
-
-    A["Configure<br/>connection + CUTOFF_TS"]:::setup --> B["Discover<br/>schemas, tables, views"]:::discover
-    B --> C["Bundle<br/>datasources.json + template.json<br/>+ seeded CSVs"]:::bundle
-    C --> F{"Run where?"}:::fork
-
-    subgraph TBL["Tables — ops VM"]
-        T1["python migrate.py<br/>kubectl apply + poll SparkApplication"]:::tables
-        TS[("table_state.csv")]:::state
-        T1 --> TS
-    end
-
-    subgraph VW["Views — JupyterHub"]
-        V1["view_workflow.migrate_views<br/>6-step DDL rewrite"]:::views
-        VS[("view_state.csv")]:::state
-        V1 --> VS
-    end
-
-    F -->|tables| T1
-    F -->|views|  V1
-
-    VAL["Validate<br/>COUNT + partition + row-level diff"]:::validate
-    TS --> VAL
-    VS --> VAL
-    VAL -.-> TS
-    VAL -.-> VS
-```
+> End-to-end flow diagram: [`data migration/WORKFLOW_DIAGRAM.md`](data%20migration/WORKFLOW_DIAGRAM.md).
 
 ## What it does
 
