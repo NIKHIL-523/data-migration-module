@@ -1,6 +1,6 @@
 # Iceberg Migration Toolkit
 
-> Notebook-driven QA → prod migration of Apache Iceberg tables and
+> Notebook-driven source → target migration of Apache Iceberg tables and
 > views across two Hive Metastore catalogs. Tables migrate via Spark
 > Operator on Kubernetes; views and validation run inside JupyterHub.
 
@@ -19,12 +19,12 @@
   per batch, drops on an ops VM, polls Kubernetes for completion
   (`COMPLETED` / `FAILED`).
 - **Views** — rewrites view DDL (catalog swap, base-table prefix,
-  `LOCATION`, `CREATE OR REPLACE`) and re-applies on the prod catalog
+  `LOCATION`, `CREATE OR REPLACE`) and re-applies on the target catalog
   from JupyterHub, no kubectl needed.
 - **Validation** — `COUNT(*)` parity + Iceberg partition spec
   comparison for tables; full-outer `eqNullSafe` join + per-column
   mismatch reporting for views.
-- **Property sync** — copy specific `TBLPROPERTIES` keys QA → prod, key
+- **Property sync** — copy specific `TBLPROPERTIES` keys source → target, key
   by key, with dry-run plan + safety-gated apply.
 - **Backup rename** — schema-level move-aside before re-migration
   (`<schema>` → `<schema>_v2`), table-by-table since Hive doesn't
@@ -44,13 +44,27 @@ cd "data-migration-module/data migration"
 # Open workflow.ipynb in JupyterHub (or any PySpark kernel)
 ```
 
-In **Cell 2**, edit the three blocks at the top:
+In **Cell 2**, edit the four config blocks at the top:
 
 ```python
-connection = { "qa_hms_uri": "...", "prod_hms_uri": "...", ... }   # endpoints
-sparkapp   = { "driver_memory": "20g", "executor_instances": "30", ... }
+SOURCE_ENV = "qa"      # display label for the source side
+TARGET_ENV = "prod"    # display label for the target side
+
 CUTOFF_TS  = "2026-05-12 23:59:59.999"   # one edit; flows everywhere
+
+connection = {
+    "source_hms_uri":   "thrift://...",
+    "target_hms_uri":   "thrift://...",
+    "source_warehouse": "abfs://...",
+    "target_warehouse": "abfs://...",
+    ...
+}
+sparkapp   = { "driver_memory": "20g", "executor_instances": "30", ... }
 ```
+
+`SOURCE_ENV` / `TARGET_ENV` are display-only labels — the code paths are
+direction-agnostic, so the same notebook works for `dev → staging`,
+`staging → prod`, or any other two-environment migration.
 
 Restart the kernel, run cells in order. Each section opens with a
 **What / Run when / Gotcha** markdown intro.
@@ -103,7 +117,7 @@ data-migration-module/
 | #     | Section                                   | Type                |
 |-------|-------------------------------------------|---------------------|
 | 1–2   | Setup (SparkSession + imports + CUTOFF)   | one-shot            |
-| 3–4   | List QA schemas                           | discovery           |
+| 3–4   | List source-catalog schemas               | discovery           |
 | 5–6   | Table summary + per-table `COUNT(*)`      | discovery           |
 | 7–8   | Define selections + datasources rows      | plan                |
 | 9–10  | Build template + write session bundle     | plan                |

@@ -93,8 +93,8 @@ def write_session_bundle(
         seed_rows=[
             {
                 "table_key":  _table_key(r.get("table", "")),
-                "qa_table":   r.get("table", ""),
-                "prod_table": _prod_table_from_ds_row(r),
+                "source_table":   r.get("table", ""),
+                "target_table": _target_table_from_ds_row(r),
             }
             for r in datasources_rows
         ],
@@ -132,14 +132,14 @@ def _table_key(full: str) -> str:
     return f"{db}__{t}"
 
 
-def _prod_table_from_ds_row(row: dict) -> str:
+def _target_table_from_ds_row(row: dict) -> str:
     qa = row.get("table") or ""
     if "." not in qa:
         return ""
-    qa_db, qa_t = qa.split(".", 1)
-    prod_db = row.get("outputSchema") or qa_db
-    prod_t  = row.get("outputTable")  or qa_t
-    return f"{prod_db}.{prod_t}"
+    source_db, source_t = qa.split(".", 1)
+    target_db = row.get("outputSchema") or source_db
+    target_t  = row.get("outputTable")  or source_t
+    return f"{target_db}.{target_t}"
 
 
 def _write_empty_state_csv(path: Path, columns: list[str],

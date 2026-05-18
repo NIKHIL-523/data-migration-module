@@ -82,8 +82,8 @@ def _resolve_spec(raw: dict) -> dict:
         "tgt_view":       tgt_view,
         "base_table":     base_full,
         "target_location": tgt_loc,
-        "qa_view":        f"{SRC_CATALOG}.{src_full}",
-        "prod_view":      f"{TGT_CATALOG}.{tgt_db}.{tgt_view}",
+        "source_view_fqn": f"{SRC_CATALOG}.{src_full}",
+        "target_view_fqn": f"{TGT_CATALOG}.{tgt_db}.{tgt_view}",
         "filter_expression": (raw.get("filter_expression") or DEFAULT_FILTER_SQL).strip(),
         "join_key":       (raw.get("join_key") or DEFAULT_JOIN_KEY).strip(),
         "cast_to_string": (raw.get("cast_to_string") if isinstance(raw.get("cast_to_string"), list)
@@ -95,7 +95,7 @@ def _resolve_spec(raw: dict) -> dict:
 # View migration -- 6-step DDL rewrite
 # ---------------------------------------------------------------------------
 
-def _rewrite_view_ddl(qa_ddl: str, *, src_db: str, src_view: str,
+def _rewrite_view_ddl(source_ddl: str, *, src_db: str, src_view: str,
                       tgt_db: str, tgt_view: str,
                       base_table: str, target_location: str) -> str:
     """Apply the canonical 6-step DDL rewrite from 03_view_migration.
@@ -110,7 +110,7 @@ def _rewrite_view_ddl(qa_ddl: str, *, src_db: str, src_view: str,
     5. Set LOCATION to the prod target.
     6. Convert to CREATE OR REPLACE.
     """
-    ddl = qa_ddl
+    ddl = source_ddl
     # Step 1: catalog swap on body (idempotent).
     ddl = ddl.replace(f"{SRC_CATALOG}.", "")
     ddl = ddl.replace(f"{TGT_CATALOG}.", "")
@@ -184,15 +184,15 @@ def migrate_one_view(spark, spec: dict, *, verbose: bool = True,
     (True, ddl, None) on a successful rewrite. Use to preview the
     rewritten DDL safely before applying.
     """
-    qa_view = spec["qa_view"]
+    source_view = spec["source_view_fqn"]
     try:
-        rows = spark.sql(f"SHOW CREATE TABLE {qa_view}").collect()
+        rows = spark.sql(f"SHOW CREATE TABLE {source_view}").collect()
     except Exception as e:
-        return False, "", f"SHOW CREATE TABLE failed for {qa_view}: {e}"
-    qa_ddl = "\n".join(r[0] for r in rows)
+        return False, "", f"SHOW CREATE TABLE failed for {source_view}: {e}"
+    source_ddl = "\n".join(r[0] for r in rows)
 
     ddl = _rewrite_view_ddl(
-        qa_ddl,
+        source_ddl,
         src_db=spec["src_db"], src_view=spec["src_view"],
         tgt_db=spec["tgt_db"], tgt_view=spec["tgt_view"],
         base_table=spec["base_table"],
@@ -200,7 +200,7 @@ def migrate_one_view(spark, spec: dict, *, verbose: bool = True,
     )
     if verbose:
         prefix = "  [dry-run] rewrite for" if dry_run else "  rewriting ->"
-        print(f"{prefix} {spec['prod_view']}", flush=True)
+        print(f"{prefix} {spec['target_view_fqn']}", flush=True)
 
     if dry_run:
         return True, ddl, None
@@ -269,9 +269,9 @@ def migrate_views(spark, bundle_dir: str | Path, view_specs: list[dict], *,
         state_df = upsert_row(
             state_df, "view_suffix", spec["view_suffix"],
             {
-                "qa_view":        spec["qa_view"],
-                "prod_view":      spec["prod_view"],
-                "migrate_status": "success" if ok else "failed",
+                "source_view_fqn": spec["source_view_fqn"],
+                "target_view_fqn": spec["target_view_fqn"],
+                "migrate_status":  "success" if ok else "failed",
                 "migrate_at":     utc_now_iso(),
                 "migrate_error":  "" if ok else (err or ""),
             },
@@ -310,19 +310,19 @@ def validate_one_view(spark, spec: dict, *, verbose: bool = True,
     from pyspark.sql import functions as F
 
     out: dict = {
-        "qa_count": "", "prod_count": "", "mismatched_rows": "",
+        "source_count": "", "target_count": "", "mismatched_rows": "",
         "validation_status": "", "validation_error": "",
         "per_column_mismatches": {},
     }
-    qa_view   = spec["qa_view"]
-    prod_view = spec["prod_view"]
+    source_view   = spec["source_view_fqn"]
+    target_view = spec["target_view_fqn"]
     where_sql = spec["filter_expression"]
     join_key  = spec["join_key"]
     cast_to_string = set(spec["cast_to_string"])
 
     try:
-        old_df = spark.table(qa_view).where(where_sql) if where_sql else spark.table(qa_view)
-        new_df = spark.table(prod_view).where(where_sql) if where_sql else spark.table(prod_view)
+        old_df = spark.table(source_view).where(where_sql) if where_sql else spark.table(source_view)
+        new_df = spark.table(target_view).where(where_sql) if where_sql else spark.table(target_view)
 
         if join_key not in old_df.columns:
             raise RuntimeError(f"join key {join_key!r} not in QA view columns")
@@ -348,11 +348,11 @@ def validate_one_view(spark, spec: dict, *, verbose: bool = True,
         new_renamed = _rename("new", new_df)
         joined = old_renamed.join(new_renamed, on=join_key, how="full_outer")
 
-        qa_count   = old_df.count()
-        prod_count = new_df.count()
-        out["qa_count"]   = qa_count
-        out["prod_count"] = prod_count
-        count_ok = (qa_count == prod_count)
+        source_count   = old_df.count()
+        target_count = new_df.count()
+        out["source_count"]   = source_count
+        out["target_count"] = target_count
+        count_ok = (source_count == target_count)
 
         total_mismatched = 0
         if compare_cols:
@@ -396,8 +396,8 @@ def status_label(res: dict) -> str:
     if s == "ok":
         return "OK"
     if s == "mismatch":
-        qa   = res.get("qa_count")
-        prod = res.get("prod_count")
+        qa   = res.get("source_count")
+        prod = res.get("target_count")
         rows = res.get("mismatched_rows")
         return f"DIFF (qa={qa}, prod={prod}, mismatched_rows={rows})"
     if s == "error":
@@ -448,12 +448,12 @@ def validate_views(spark, bundle_dir: str | Path, view_specs: list[dict], *,
         state_df = upsert_row(
             state_df, "view_suffix", spec["view_suffix"],
             {
-                "qa_view":          spec["qa_view"],
-                "prod_view":        spec["prod_view"],
+                "source_view_fqn":  spec["source_view_fqn"],
+                "target_view_fqn":  spec["target_view_fqn"],
                 "validation_at":    utc_now_iso(),
                 "validation_status": res["validation_status"],
-                "qa_count":          res["qa_count"],
-                "prod_count":        res["prod_count"],
+                "source_count":          res["source_count"],
+                "target_count":        res["target_count"],
                 "mismatched_rows":   res["mismatched_rows"],
                 "validation_error":  res["validation_error"],
             },

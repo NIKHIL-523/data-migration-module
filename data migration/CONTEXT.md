@@ -18,7 +18,7 @@ viewer can override cells without touching code.
 ├── bundle_writer.py         write_session_bundle (tables + view-state seed)
 ├── session_state.py         pandas-flavoured CSV state helpers (notebook side)
 ├── view_workflow.py         migrate_views + validate_views (in-Hub, CSV-tracked)
-├── table_properties.py      QA<->prod TBLPROPERTIES extract + diff (post-migration property sync)
+├── table_properties.py      source<->target TBLPROPERTIES extract + diff (post-migration property sync)
 ├── migrate_template/
 │   └── migrate.py           CANONICAL ops-VM driver -- stdlib csv only, no pandas
 ├── sessions/                per-session bundles (gitignore-able)
@@ -34,7 +34,7 @@ viewer can override cells without touching code.
 ├── WORKFLOW_DIAGRAM.md      mermaid diagram of the end-to-end flow
 ├── adhoc_kg_publish_cutoff_delete_CELLS.md       ad-hoc: delete post-cutoff rows from prod.kg_publish
 ├── adhoc_rename_kg_publish_olap_to_v1_CELLS.md   ad-hoc: rename prod.kg_publish + prod.kg_olap to _v1
-├── adhoc_extract_table_properties_CELLS.md       ad-hoc: extract Iceberg TBLPROPERTIES (QA vs prod diff) for the property-sync phase
+├── adhoc_extract_table_properties_CELLS.md       ad-hoc: extract Iceberg TBLPROPERTIES (source vs target diff) for the property-sync phase
 └── CONTEXT.md               this file
 ```
 
@@ -63,7 +63,7 @@ viewer can override cells without touching code.
 - **Polling stays as the apply-wait strategy.** After each `kubectl
   apply`, migrate.py polls SparkApplication state every 30s until
   COMPLETED or FAILED. `--no-poll` was removed from the canonical
-  driver; the qa_count sleep estimator is kept for reference only.
+  driver; the source_count sleep estimator is kept for reference only.
 - **Display style** = plain `display(df)` inside `pd.option_context`.
   No styled HTML, no glyphs.
 
@@ -72,7 +72,7 @@ viewer can override cells without touching code.
 | Cells | Step |
 |---|---|
 | 1-2  | Enter `connection` + `sparkapp` dicts → build `SparkSession` |
-| 3-5  | List QA schemas → pick → table summary with partition spec |
+| 3-5  | List source schemas → pick → table summary with partition spec |
 | 6-7  | Define `selections` (src/tgt mapping + overrides) → build datasources rows |
 | 8-9  | Build `template.json` → write session bundle (4-5 files in `sessions/<name>/`) |
 | 10-11 | After ops-VM run: read `table_state.csv`, run count validation, write back |
@@ -86,15 +86,15 @@ viewer can override cells without touching code.
 | column | populated by | values |
 |---|---|---|
 | `table_key` (PK) | seeded at bundle write | `<src_db>__<src_table>` — unique across source schemas |
-| `qa_table`, `prod_table` | seeded; refreshed by migrate.py | fully qualified `<db>.<t>` |
+| `source_table`, `target_table` | seeded; refreshed by migrate.py | fully qualified `<db>.<t>` |
 | `apply_status` | migrate.py | `""` \| `applying` \| `success` \| `failed` \| `timeout` |
 | `apply_at` | migrate.py | ISO UTC |
 | `k8s_state` | migrate.py | `COMPLETED` \| `FAILED` \| `SUBMITTED` \| … |
 | `k8s_name` | migrate.py | RFC-1123 metadata.name |
 | `apply_error` | migrate.py | string |
 | `validation_status` | notebook | `""` \| `ok` \| `mismatch` \| `error` |
-| `validation_at`, `qa_count`, `prod_count`, `prod_count_total` | notebook | … |
-| `partition_qa`, `partition_prod`, `partition_match` | notebook | derived via Py4J |
+| `validation_at`, `source_count`, `target_count`, `target_count_total` | notebook | … |
+| `partition_source`, `partition_target`, `partition_match` | notebook | derived via Py4J |
 | `validation_error` | notebook | string |
 
 `view_state.csv` (driven by view_workflow):
@@ -102,11 +102,11 @@ viewer can override cells without touching code.
 | column | populated by | values |
 |---|---|---|
 | `view_suffix` (PK) | seeded | string |
-| `qa_view`, `prod_view` | view_workflow | fully qualified |
+| `source_view`, `target_view` | view_workflow | fully qualified |
 | `migrate_status` | migrate_views | `""` | `success` | `failed` |
 | `migrate_at`, `migrate_error` | migrate_views | … |
 | `validation_status` | validate_views | `""` | `ok` | `mismatch` | `error` |
-| `validation_at`, `qa_count`, `prod_count`, `mismatched_rows`, `validation_error` | validate_views | … |
+| `validation_at`, `source_count`, `target_count`, `mismatched_rows`, `validation_error` | validate_views | … |
 
 ## migrate.py contract (ops VM)
 

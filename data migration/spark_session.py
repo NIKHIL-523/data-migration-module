@@ -24,13 +24,13 @@ def _catalog_conf(connection: dict) -> dict[str, str]:
         "spark.hadoop.hive.metastore.execute.setugi": "false",
         "spark.sql.catalog.iceberg_catalog1": "org.apache.iceberg.spark.SparkCatalog",
         "spark.sql.catalog.iceberg_catalog1.type": "hive",
-        "spark.sql.catalog.iceberg_catalog1.uri": connection["qa_hms_uri"],
-        "spark.hadoop.hive.metastore.uris": connection["qa_hms_uri"],
-        "spark.sql.catalog.iceberg_catalog1.warehouse": connection["qa_warehouse"],
+        "spark.sql.catalog.iceberg_catalog1.uri": connection["source_hms_uri"],
+        "spark.hadoop.hive.metastore.uris": connection["source_hms_uri"],
+        "spark.sql.catalog.iceberg_catalog1.warehouse": connection["source_warehouse"],
         "spark.sql.catalog.iceberg_catalog2": "org.apache.iceberg.spark.SparkCatalog",
         "spark.sql.catalog.iceberg_catalog2.type": "hive",
-        "spark.sql.catalog.iceberg_catalog2.uri": connection["prod_hms_uri"],
-        "spark.sql.catalog.iceberg_catalog2.warehouse": connection["prod_warehouse"],
+        "spark.sql.catalog.iceberg_catalog2.uri": connection["target_hms_uri"],
+        "spark.sql.catalog.iceberg_catalog2.warehouse": connection["target_warehouse"],
         "spark.sql.extensions": (
             "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
         ),
