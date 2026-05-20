@@ -92,9 +92,11 @@ def write_session_bundle(
         TABLE_STATE_COLUMNS,
         seed_rows=[
             {
-                "table_key":  _table_key(r.get("table", "")),
-                "source_table":   r.get("table", ""),
+                "table_key":    _state_key(r.get("table", ""),
+                                           _k8s_name_for_row(r)),
+                "source_table": r.get("table", ""),
                 "target_table": _target_table_from_ds_row(r),
+                "k8s_name":     _k8s_name_for_row(r),
             }
             for r in datasources_rows
         ],
@@ -120,9 +122,10 @@ def write_session_bundle(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _table_key(full: str) -> str:
-    """Unique row key: <src_db>__<src_table>. Same shape as migrate.py's
-    table_key() so both sides hash to the same value."""
+def _table_key_base(full: str) -> str:
+    """Legacy half of the state key: <src_db>__<src_table>. Used as the
+    building block for _state_key() and mirrored from migrate.py's
+    table_key_base()."""
     full = (full or "").strip()
     if not full:
         return ""
@@ -130,6 +133,25 @@ def _table_key(full: str) -> str:
         return full
     db, _, t = full.partition(".")
     return f"{db}__{t}"
+
+
+def _state_key(full: str, k8s_name: str) -> str:
+    """Unique row key: <src_db>__<src_table>__<k8s_name>. Mirrors
+    migrate.py's state_key() so notebook + ops VM hash to the same value
+    even when the same source table is migrated under two different
+    k8sName overrides."""
+    base = _table_key_base(full)
+    k8s = (k8s_name or "").strip()
+    return f"{base}__{k8s}" if k8s else base
+
+
+def _k8s_name_for_row(row: dict) -> str:
+    """Mirror of migrate.py's k8s_name_for(row['table'], row['k8sName'])."""
+    override = (row.get("k8sName") or "").strip()
+    if override:
+        return override
+    full = (row.get("table") or "").strip()
+    return full.split(".")[-1].replace("_", "").replace("-", "")[:53]
 
 
 def _target_table_from_ds_row(row: dict) -> str:

@@ -11,9 +11,14 @@ from the notebook.
 Two CSV schemas (one file each per session):
 
 table_state.csv  (driven by migrate.py + the validate cell)
-    table_key          (PK; "<src_db>__<src_table>", unique across schemas
-                        so two rows with the same bare table name in
-                        different src schemas don't collide)
+    table_key          (PK; "<src_db>__<src_table>__<k8s_name>", unique
+                        across schemas AND across k8sName overrides so two
+                        rows with the same bare table name in different src
+                        schemas -- or the same source table migrated twice
+                        under different k8sName overrides -- don't collide.
+                        Old state files written under the legacy two-part
+                        form "<src_db>__<src_table>" are still readable;
+                        the first migrate.py run upgrades them in place.)
     source_table           full db.table on QA side
     target_table         full db.table on prod side
     apply_status       "" | success | failed | timeout | applying

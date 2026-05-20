@@ -85,7 +85,7 @@ viewer can override cells without touching code.
 
 | column | populated by | values |
 |---|---|---|
-| `table_key` (PK) | seeded at bundle write | `<src_db>__<src_table>` — unique across source schemas |
+| `table_key` (PK) | seeded at bundle write | `<src_db>__<src_table>__<k8s_name>` — unique across source schemas AND across k8sName overrides; legacy 2-part form readable for back-compat |
 | `source_table`, `target_table` | seeded; refreshed by migrate.py | fully qualified `<db>.<t>` |
 | `apply_status` | migrate.py | `""` \| `applying` \| `success` \| `failed` \| `timeout` |
 | `apply_at` | migrate.py | ISO UTC |
@@ -138,7 +138,7 @@ For batch overrides: edit the CSV in any editor or in a notebook cell:
 ```python
 from session_state import load_state, save_state
 df = load_state(bundle, kind="table")
-df.loc[df["table_key"] == "kg_publish_final__sds_em__finding__publish", "apply_status"] = ""
+df.loc[df["table_key"] == "kg_publish_final__sds_em__finding__publish__sdsemfindingpublish-pub", "apply_status"] = ""
 save_state(df, bundle, kind="table")
 ```
 

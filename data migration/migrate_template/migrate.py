@@ -20,9 +20,14 @@ Reads:
                              source_count, target_count, target_count_total,
                              partition_source, partition_target, partition_match,
                              validation_error
-                         `table_key` is "<src_db>__<src_table>" so two
-                         tables with the same bare name in different
-                         source schemas don't collide.
+                         `table_key` is "<src_db>__<src_table>__<k8s_name>"
+                         so the same source table migrated under two
+                         different `k8sName` overrides (e.g. publish vs
+                         olap with distinct target schemas) gets two
+                         distinct state rows instead of clobbering one
+                         another. Old state files with the legacy
+                         "<src_db>__<src_table>" key are still readable;
+                         the first migrate.py run upgrades them in place.
 
 Writes:
   ./rendered/<table_key>.json      Per-table SparkApplication CR (kubectl-ready)
@@ -91,9 +96,10 @@ def table_name(full_table: str) -> str:
     return full_table.strip().split(".")[-1]
 
 
-def table_key(full_table: str) -> str:
-    """Unique PK for a row in table_state.csv: '<src_db>__<src_table>'.
-    Same shape as bundle_writer._table_key so notebook + ops VM agree."""
+def table_key_base(full_table: str) -> str:
+    """Legacy state-key shape: '<src_db>__<src_table>'. Kept for backward
+    compatibility with state files written before k8s_name was part of the
+    PK, and as the building block for state_key()."""
     full = full_table.strip()
     if not full:
         return ""
@@ -101,6 +107,18 @@ def table_key(full_table: str) -> str:
         return full
     db, _, t = full.partition(".")
     return f"{db}__{t}"
+
+
+def state_key(full_table: str, k8s_name: str) -> str:
+    """Unique PK for a row in table_state.csv:
+    '<src_db>__<src_table>__<k8s_name>'. k8s_name disambiguates rows
+    that share the same source table but were rendered under different
+    `k8sName` overrides (e.g. the kg_publish vs kg_olap multi-target
+    case). Same shape as bundle_writer._state_key so notebook + ops VM
+    hash to the same value."""
+    base = table_key_base(full_table)
+    k8s = (k8s_name or "").strip()
+    return f"{base}__{k8s}" if k8s else base
 
 
 def find_unresolved_placeholders(template: dict) -> list[str]:
@@ -233,20 +251,33 @@ def save_state(state: dict[str, dict[str, str]]) -> None:
             writer.writerow(row)
 
 
-def state_status(state: dict, source_table: str) -> str:
-    entry = state.get(table_key(source_table)) or {}
-    return (entry.get("apply_status") or "").strip().lower()
+def state_status(state: dict, source_table: str, k8s_name: str) -> str:
+    """Look up apply_status for (source_table, k8s_name). Falls back to
+    the legacy two-part key for state files written before k8s_name was
+    part of the PK."""
+    primary = state.get(state_key(source_table, k8s_name))
+    if primary is not None:
+        return (primary.get("apply_status") or "").strip().lower()
+    legacy = state.get(table_key_base(source_table))
+    if legacy is not None:
+        return (legacy.get("apply_status") or "").strip().lower()
+    return ""
 
 
 def mark_apply(state: dict, *, source_table: str, target_table: str, k8s_name: str,
                apply_status: str, k8s_state: str | None,
                apply_error: str | None) -> None:
-    suf = table_key(source_table)
+    suf = state_key(source_table, k8s_name)
+    # If a legacy row exists for this source_table (pre-k8s_name keying),
+    # drop it so we don't carry stale duplicates forward.
+    legacy = table_key_base(source_table)
+    if legacy != suf and legacy in state:
+        state.pop(legacy, None)
     entry = state.get(suf, {c: "" for c in STATE_COLUMNS})
     entry.update({
         "table_key":     suf,
-        "source_table":      source_table,
-        "target_table":    target_table,
+        "source_table":  source_table,
+        "target_table":  target_table,
         "apply_status":  apply_status,
         "apply_at":      utc_now_iso(),
         "k8s_state":     k8s_state or "",
@@ -289,10 +320,11 @@ def render(row: dict, template: dict) -> tuple[str, str, Path, int | None]:
     # flag entirely lets IcebergMigrate apply its own (src-schema) default.
     if not effective_schema:
         remove_arg(args, "--outputSchema")
-    rendered["metadata"]["name"] = k8s_name_for(table, row.get("k8sName"))
+    k8s_name = k8s_name_for(table, row.get("k8sName"))
+    rendered["metadata"]["name"] = k8s_name
 
     RENDERED_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RENDERED_DIR / f"{table_key(table)}.json"
+    out_path = RENDERED_DIR / f"{state_key(table, k8s_name)}.json"
     with out_path.open("w") as f:
         json.dump(rendered, f, indent=2)
 
@@ -369,10 +401,13 @@ def read_manifest_identity(path: Path) -> tuple[str, str]:
 
 def matches(row: dict, selector: str) -> bool:
     table = (row.get("table") or "").strip()
+    k8s_name = k8s_name_for(table, row.get("k8sName"))
     return (
         selector == table
         or selector == table_name(table)
-        or selector == table_key(table)
+        or selector == table_key_base(table)
+        or selector == state_key(table, k8s_name)
+        or selector == k8s_name
     )
 
 
@@ -380,9 +415,10 @@ def filter_pending(rows: list[dict], state: dict) -> tuple[list[dict], list[str]
     pending: list[dict] = []
     skipped: list[str] = []
     for r in rows:
-        qa = (r.get("table") or "").strip()
-        if state_status(state, qa) == "success":
-            skipped.append(qa)
+        source = (r.get("table") or "").strip()
+        k8s_name = k8s_name_for(source, r.get("k8sName"))
+        if state_status(state, source, k8s_name) == "success":
+            skipped.append(source)
         else:
             pending.append(r)
     return pending, skipped
