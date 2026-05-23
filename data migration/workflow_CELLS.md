@@ -179,10 +179,12 @@ filtered count may scan partitions and be slow on huge tables. Set
 
 ```python
 selected_schemas = [
+    "lookup_v2",
+    "kg",
+    "kg_fragment",
     "kg_olap_v3",
+    "kg_fragment_olap_v3",
     "kg_publish_final",
-    # "kg_fragment",
-    # "kg_mini",
 ]
 
 # Optional filter applied to the COUNT(*) query. Leave empty for unfiltered,
@@ -401,27 +403,46 @@ derives partition spec on both sides, writes verdict back to the CSV.
 bundle's tables.
 
 **Gotcha.** `reset_validation = True` wipes prior validation columns on
-every run. Set to False to keep skip-success behaviour. `where_sql`
-defaults to `CUTOFF` (Cell 2) so the validation count matches what
-`migrate.py` ran. The `target_count_total` column is the UN-filtered
-target count — a sanity check that the target isn't carrying rows
-beyond the cutoff.
+every run. Set to False to keep skip-success behaviour. The per-row
+filter is loaded from the bundle's `datasources.json` (each row's
+`filterExpression`) so chunked / per-schema filters validate correctly;
+`fallback_where` is only used for rows missing a filter or when
+`datasources.json` is absent. The `target_count_total` column is the
+UN-filtered target count — a sanity check that the target isn't carrying
+rows beyond the cutoff.
 
 ---
 
 ## Cell 12 — code
 
 ```python
+import json
+from bundle_writer import k8s_name_for_datasource_row
+
 bundle = Path("sessions/kg_olap_publish__final")    # adjust if path differs
 
-# Cutoff filter applied to BOTH sides for count comparison. "" = unfiltered.
-where_sql = CUTOFF
+# Per-row filter is read from datasources.json (each row's filterExpression),
+# keyed by k8s_name. Use fallback_where for rows missing a filter, or set
+# fallback_where = "" to leave them unfiltered.
+fallback_where = CUTOFF
 
 # Wipe prior validation state so the loop re-checks everything.
 # False = keep skip-success behaviour.
 reset_validation = True
 
 state_df = load_state(bundle, kind="table")
+
+# Load per-row filter map from datasources.json (keyed by the same k8s_name
+# the state CSV stores). Missing file -> empty map -> all rows use fallback.
+ds_path = bundle / "datasources.json"
+filter_by_k8s: dict[str, str] = {}
+if ds_path.exists():
+    ds_rows = json.loads(ds_path.read_text())
+    for row in ds_rows:
+        filter_by_k8s[k8s_name_for_datasource_row(row)] = (row.get("filterExpression") or "")
+    print(f"loaded {len(filter_by_k8s)} per-row filter(s) from {ds_path.name}")
+else:
+    print(f"WARN no {ds_path.name} found -- every row will use fallback_where")
 
 if reset_validation:
     for col in ("validation_status", "validation_at",
@@ -435,22 +456,27 @@ if reset_validation:
 
 print(f"state : {bundle / 'table_state.csv'}")
 print(f"rows  : {len(state_df)}")
-print(f"where : {where_sql or '<unfiltered>'}")
+print(f"fallback_where : {fallback_where or '<unfiltered>'}")
 print("-" * 60)
 
 for _, r in state_df.iterrows():
     key = r["table_key"]
     source, target = r["source_table"], r["target_table"]
+    k8s = (r.get("k8s_name") or "").strip()
 
     if not is_pending(state_df, "table_key", key, "validation_status"):
         print(f"SKIP   {key}  (validation_status already ok)")
         continue
 
+    # Per-row filter: prefer datasources.json's filterExpression for this
+    # row's k8s_name; fall back to fallback_where (or '' if also missing).
+    where_sql = filter_by_k8s.get(k8s, fallback_where)
+
     s_fqn = f"iceberg_catalog1.{source}"
     t_fqn = f"iceberg_catalog2.{target}"
     fields = {"validation_at": utc_now_iso()}
     try:
-        # Filtered counts (BOTH sides under the same cutoff)
+        # Filtered counts (BOTH sides under the same per-row filter)
         q_source   = f"SELECT COUNT(*) c FROM {s_fqn}" + (f" WHERE {where_sql}" if where_sql else "")
         q_target = f"SELECT COUNT(*) c FROM {t_fqn}" + (f" WHERE {where_sql}" if where_sql else "")
         source_c   = int(spark.sql(q_source).collect()[0]["c"])

@@ -93,10 +93,10 @@ def write_session_bundle(
         seed_rows=[
             {
                 "table_key":    _state_key(r.get("table", ""),
-                                           _k8s_name_for_row(r)),
+                                           k8s_name_for_datasource_row(r)),
                 "source_table": r.get("table", ""),
                 "target_table": _target_table_from_ds_row(r),
-                "k8s_name":     _k8s_name_for_row(r),
+                "k8s_name":     k8s_name_for_datasource_row(r),
             }
             for r in datasources_rows
         ],
@@ -145,8 +145,10 @@ def _state_key(full: str, k8s_name: str) -> str:
     return f"{base}__{k8s}" if k8s else base
 
 
-def _k8s_name_for_row(row: dict) -> str:
-    """Mirror of migrate.py's k8s_name_for(row['table'], row['k8sName'])."""
+def k8s_name_for_datasource_row(row: dict) -> str:
+    """Compute the SparkApplication metadata.name (= state_key suffix) for one
+    datasources.json row. Mirrors migrate.py's k8s_name_for(row['table'],
+    row['k8sName']) and the value written into table_state.csv's k8s_name column."""
     override = (row.get("k8sName") or "").strip()
     if override:
         return override
@@ -243,4 +245,5 @@ __all__ = [
     "MIGRATE_TEMPLATE",
     "write_session_bundle",
     "show_bundle_links",
+    "k8s_name_for_datasource_row",
 ]

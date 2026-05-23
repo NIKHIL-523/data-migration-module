@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented here.
 
+## Unreleased
+
+### Fixed
+- **Cell 12 (table validation) now uses per-row filters from
+  `datasources.json`** instead of a single global `where_sql = CUTOFF`.
+  When a bundle has rows with mixed filter expressions — different
+  per-schema filters, or time-window chunks of one large table split
+  into multiple SparkApplications — validation now counts each row
+  against the same filter it was migrated with, instead of returning
+  false mismatches.
+- Old behaviour preserved via `fallback_where = CUTOFF`: rows missing
+  a `filterExpression` (or bundles without a `datasources.json`) still
+  use the single global filter.
+
+### Changed
+- `bundle_writer._k8s_name_for_row` promoted to public
+  `k8s_name_for_datasource_row` and added to `__all__`. The validation
+  cell imports it to derive the same `k8s_name` key the state CSV
+  stores, so per-row filter lookup matches every kind of row (explicit
+  k8sName overrides AND auto-derived names).
+
+### Added
+- `test_validation_filter_lookup.py` — stdlib-only smoke tests for the
+  filter-map construction the validation cell relies on. Run with
+  `python3 test_validation_filter_lookup.py` from `data migration/`.
+
 ## 0.2.0 — 2026-05-18
 
 Generic environment naming. The codebase is no longer biased toward the
