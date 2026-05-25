@@ -182,7 +182,7 @@ def remove_arg(args: list[str], flag: str) -> None:
 def k8s_name_for(table: str, override: str | None = None) -> str:
     if override and override.strip():
         return override.strip()
-    return table.split(".")[-1].replace("_", "").replace("-", "")[:53]
+    return table.split(".")[-1].replace("_", "").replace("-", "")[:52]
 
 
 def target_table_from_row(source_table: str, row: dict, default_output_schema: str) -> str:
@@ -529,15 +529,28 @@ def main() -> int:
             print(f"[FAIL-RENDER] {row!r}: {e}", file=sys.stderr)
             return 1
 
-    # Collision check
+    # Collision check + length check.
+    # Spark Operator appends suffixes (e.g. "-driver-svc", 11 chars) to
+    # build child Service names, which are DNS-1123 labels (max 63).
+    # Safe ceiling for metadata.name is therefore 52.
     seen_names: dict[str, str] = {}
     collisions: list[tuple[str, str, str]] = []
+    too_long: list[tuple[str, str]] = []
     for source_t, _, path, _ in rendered_items:
         with path.open() as f:
             name = json.load(f)["metadata"]["name"]
+        if len(name) + 11 > 63:
+            too_long.append((name, source_t))
         if name in seen_names and seen_names[name] != source_t:
             collisions.append((name, seen_names[name], source_t))
         seen_names.setdefault(name, source_t)
+    if too_long:
+        print("FATAL: k8s metadata.name(s) exceed safe length "
+              "(52 chars, leaves room for operator-appended '-driver-svc'):",
+              file=sys.stderr)
+        for name, t in too_long:
+            print(f"  {name!r} ({len(name)} chars) <- {t}", file=sys.stderr)
+        return 1
     if collisions:
         print("FATAL: k8s metadata.name collisions detected:", file=sys.stderr)
         for name, t1, t2 in collisions:

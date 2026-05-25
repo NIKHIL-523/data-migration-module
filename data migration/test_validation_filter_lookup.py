@@ -6,7 +6,7 @@ The validation cell loads `datasources.json`, builds
 its `k8s_name`. The key must match what `bundle_writer` writes into
 `table_state.csv` for every kind of row:
   - explicit k8sName override (e.g. chunked tables: "...feb", "...mar")
-  - auto-derived (table name, underscores/hyphens stripped, truncated to 53)
+  - auto-derived (table name, underscores/hyphens stripped, truncated to 52)
 
 Run:
     cd "data migration" && python3 test_validation_filter_lookup.py
@@ -55,7 +55,7 @@ def test_explicit_k8s_overrides_for_chunked_rows() -> None:
 
 
 def test_no_override_uses_auto_derived_key() -> None:
-    """A row without k8sName matches by auto-derived key (last segment, stripped, <=53)."""
+    """A row without k8sName matches by auto-derived key (last segment, stripped, <=52)."""
     ds_rows = [
         {"table": "lookup_v2.country_lookup_iso",
          "filterExpression": "updated_at_ts <= '2026-05-22'"},
@@ -63,7 +63,7 @@ def test_no_override_uses_auto_derived_key() -> None:
     fm = build_filter_map(ds_rows)
     # bundle_writer rule: split on "." -> "country_lookup_iso"
     #                    .replace("_","").replace("-","").lower-NA, no lower
-    #                    [:53] -> "countrylookupiso"
+    #                    [:52] -> "countrylookupiso"
     assert_eq("auto key", list(fm.keys())[0], "countrylookupiso")
     assert_eq("filter", fm["countrylookupiso"], "updated_at_ts <= '2026-05-22'")
 

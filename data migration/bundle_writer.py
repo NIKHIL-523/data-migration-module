@@ -153,7 +153,7 @@ def k8s_name_for_datasource_row(row: dict) -> str:
     if override:
         return override
     full = (row.get("table") or "").strip()
-    return full.split(".")[-1].replace("_", "").replace("-", "")[:53]
+    return full.split(".")[-1].replace("_", "").replace("-", "")[:52]
 
 
 def _target_table_from_ds_row(row: dict) -> str:
