@@ -6,6 +6,11 @@ plus an optional `sparkapp` dict for sizing knobs. Builds a SparkSession with
 both Iceberg catalogs registered and the kg-view-validation JVM tuning
 (memory, AQE, G1GC, Kryo, off-heap, shuffle.partitions) baked in.
 
+Multi-cloud: `connection["cloud"]["provider"]` drives the Hadoop FS auth
+block (Azure ABFS WI, AWS S3A IRSA, GCS WI). Backward-compat: legacy
+`connection["azure_tenant"]` + `azure_client_id` are still accepted and
+treated as provider=azure.
+
 Restart the kernel before calling this -- `SparkSession.builder.getOrCreate()`
 returns the existing session if one exists, so the tuning configs below are
 silently dropped on a warm kernel.
@@ -15,9 +20,12 @@ from __future__ import annotations
 
 from pyspark.sql import SparkSession
 
+from template_builder import _normalize_cloud, _cloud_auth_conf
+
 
 def _catalog_conf(connection: dict) -> dict[str, str]:
-    return {
+    cloud = _normalize_cloud(connection)
+    base = {
         "spark.hadoop.fs.defaultFS": connection["default_fs"],
         "spark.sds.hive.read.catalog": "iceberg_catalog1",
         "spark.sds.hive.write.catalog": "iceberg_catalog2",
@@ -36,14 +44,12 @@ def _catalog_conf(connection: dict) -> dict[str, str]:
         ),
         "spark.sql.session.timeZone": "UTC",
         "spark.sql.caseSensitive": "true",
-        # Azure ABFS via workload identity
-        "spark.hadoop.fs.azure.account.auth.type": "OAuth",
-        "spark.hadoop.fs.azure.account.oauth.provider.type": (
-            "org.apache.hadoop.fs.azurebfs.oauth2.WorkloadIdentityTokenProvider"
-        ),
-        "spark.hadoop.fs.azure.account.oauth2.msi.tenant": connection["azure_tenant"],
-        "spark.hadoop.fs.azure.account.oauth2.client.id": connection["azure_client_id"],
     }
+    # Same FS auth block emitted into the SparkApplication CR by
+    # template_builder. Sharing the helper keeps notebook + ops-VM
+    # behaviour in lockstep.
+    base.update(_cloud_auth_conf(cloud))
+    return base
 
 
 def _jvm_tuning_conf(sparkapp: dict | None) -> dict[str, str]:
