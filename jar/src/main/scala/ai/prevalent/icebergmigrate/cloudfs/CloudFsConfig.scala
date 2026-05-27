@@ -17,8 +17,18 @@ sealed trait CloudFsConfig {
   def provider: String
   def hadoopConf: Map[String, String]
 
-  final def applyTo(spark: SparkSession): Unit =
-    hadoopConf.foreach { case (k, v) => spark.conf.set(k, v) }
+  // Keys are stored with the spark.hadoop. prefix (the form a SparkApplication
+  // CR uses in sparkConf). At runtime, propagate the unprefixed form into the
+  // live Hadoop configuration so the FileSystem layer actually picks them up —
+  // spark.conf.set after the SparkContext is already running does not bridge
+  // back to Hadoop conf.
+  final def applyTo(spark: SparkSession): Unit = {
+    val hc = spark.sparkContext.hadoopConfiguration
+    hadoopConf.foreach { case (k, v) =>
+      spark.conf.set(k, v)
+      if (k.startsWith("spark.hadoop.")) hc.set(k.stripPrefix("spark.hadoop."), v)
+    }
+  }
 }
 
 object CloudFsConfig {
@@ -71,17 +81,25 @@ object CloudFsConfig {
           // AssumedRoleCredentialProvider chain: IRSA token → STS AssumeRole
           "org.apache.hadoop.fs.s3a.auth.AssumedRoleCredentialProvider"
         case None =>
-          "com.amazonaws.auth.WebIdentityTokenCredentialsProvider," +
-          "com.amazonaws.auth.ContainerCredentialsProvider," +
-          "com.amazonaws.auth.InstanceProfileCredentialsProvider," +
+          // DefaultAWSCredentialsProviderChain covers env vars, system
+          // properties, WebIdentity (IRSA), shared profile, and EC2 metadata
+          // in that order. Using it alone avoids the NPE the standalone
+          // WebIdentity provider throws when AWS_ROLE_ARN is unset.
           "com.amazonaws.auth.DefaultAWSCredentialsProviderChain"
+      }
+      // SSL follows the endpoint scheme: explicit http:// (e.g. MinIO over
+      // plain HTTP) disables SSL; everything else (https:// or no override)
+      // keeps it on, matching production S3 / IRSA behavior.
+      val sslEnabled = endpoint match {
+        case Some(ep) if ep.startsWith("http://") => "false"
+        case _                                     => "true"
       }
       val base = Map(
         "spark.hadoop.fs.s3a.aws.credentials.provider" -> providers,
         "spark.hadoop.fs.s3a.endpoint.region"          -> region,
         "spark.hadoop.fs.s3a.path.style.access"        -> pathStyleAccess.toString,
         // Sensible defaults shared across IRSA + assumed-role setups.
-        "spark.hadoop.fs.s3a.connection.ssl.enabled"   -> "true",
+        "spark.hadoop.fs.s3a.connection.ssl.enabled"   -> sslEnabled,
         "spark.hadoop.fs.s3a.fast.upload"              -> "true",
       )
       val withRole = roleArn.fold(base)(arn =>

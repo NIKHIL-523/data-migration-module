@@ -69,20 +69,24 @@ services:
       - fake-gcs-data:/data
 
   # --- Spark runner ---------------------------------------------------
-  # Use a slim Bitnami Spark for local round-trips (production uses the
-  # prevalentai image which is private). The Spark version matches the
-  # `sparkVersion` default in build.sbt. The JAR built by `sbt assembly`
-  # is mounted in read-only at /opt/spark/jars-extra so spark-submit can
-  # see it; tests `docker compose exec spark spark-submit ...`.
+  # Local-only Spark 3.5.5 Scala 2.13 build (production uses the private
+  # prevalentai image). Built from ./spark/Dockerfile — pulls the Apache
+  # binary tarball on top of temurin JRE 17. JAR built by `sbt assembly`
+  # is mounted read-only at /opt/spark/jars-extra so spark-submit sees
+  # it; tests `docker compose exec spark spark-submit ...`.
   spark:
-    image: bitnami/spark:3.5.5
+    build:
+      context: ./spark
+      args:
+        SPARK_VERSION: 3.5.5
+    image: data-migration-iceberg/spark:3.5.5-scala2.13
     user: root
     environment:
-      SPARK_MODE: master
-      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
-      # Make the cloud-FS connector jars available on the driver class-
-      # path. The image ships hadoop 3.3.4 + the s3a/abfs/gcs connectors.
-      SPARK_CLASSPATH: /opt/spark/jars-extra/*
+      # Picked up by AWS DefaultAWSCredentialsProviderChain inside our
+      # explicit provider list, so the MinIO emulator authenticates without
+      # any test-only code path in CloudFsConfig.
+      AWS_ACCESS_KEY_ID:     minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
     volumes:
       - ../target/scala-2.13:/opt/spark/jars-extra:ro     # sbt assembly output
       - ./scripts:/opt/it/scripts:ro

@@ -40,11 +40,11 @@ class CloudFsConfigSpec extends AnyFlatSpec with Matchers {
 
   // --- AWS ---------------------------------------------------------------
 
-  "AWS" should "default to a WebIdentity-first provider chain" in {
+  "AWS" should "default to the DefaultAWSCredentialsProviderChain (IRSA-capable)" in {
     val cfg = CloudFsConfig.Aws(region = "us-east-1")
     cfg.provider shouldBe "aws"
-    cfg.hadoopConf("spark.hadoop.fs.s3a.aws.credentials.provider") should
-      startWith("com.amazonaws.auth.WebIdentityTokenCredentialsProvider")
+    cfg.hadoopConf("spark.hadoop.fs.s3a.aws.credentials.provider") shouldBe
+      "com.amazonaws.auth.DefaultAWSCredentialsProviderChain"
     cfg.hadoopConf("spark.hadoop.fs.s3a.endpoint.region")   shouldBe "us-east-1"
     cfg.hadoopConf("spark.hadoop.fs.s3a.path.style.access") shouldBe "false"
   }
